@@ -1,246 +1,308 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-# ---------------------------------------------------------
-# PAGE CONFIG
-# ---------------------------------------------------------
-st.set_page_config(page_title="Dashboard Perceraian Jawa Timur", layout="wide")
+# Set page configuration
+st.set_page_config(page_title="Dashboard Pernikahan dan Perceraian Jawa Timur", 
+                   page_icon="💑", 
+                   layout="wide")
 
-st.title("💔 Dashboard Perceraian Jawa Timur")
-st.markdown("Analisis perceraian berdasarkan Kabupaten/Kota dan faktor penyebab (2020–2024).")
-
-
-# ---------------------------------------------------------
-# LOAD DATA (bersihkan semua angka)
-# ---------------------------------------------------------
+# Load data
 @st.cache_data
 def load_data():
-    df = pd.read_excel("data.xlsx")
-    df.columns = df.columns.str.strip()
+    df = pd.read_excel('data.xlsx')
+    return df
 
-    kolom_total = "Fakor Perceraian - Jumlah"
+df = load_data()
 
-    faktor_cols = [
-        c for c in df.columns
-        if c.startswith("Fakor Perceraian -") and c != kolom_total
-    ]
+# Title and description
+st.title("📊 Dashboard Analisis Pernikahan dan Perceraian Jawa Timur")
+st.markdown("---")
 
-    # Bersihkan angka: hilangkan ".", "-", "..."
-    for c in faktor_cols + [kolom_total]:
-        df[c] = df[c].astype(str).str.replace(r"[^0-9]", "", regex=True)
-        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
-
-    df["Nikah"] = pd.to_numeric(
-        df["Nikah"].astype(str).str.replace(r"[^0-9]", "", regex=True),
-        errors="coerce"
-    ).fillna(0).astype(int)
-
-    df["Tahun"] = pd.to_numeric(df["Tahun"], errors="coerce").astype(int)
-
-    return df, kolom_total, faktor_cols
-
-
-df, kolom_total, faktor_cols = load_data()
-
-
-# ---------------------------------------------------------
-# SIDEBAR FILTER
-# ---------------------------------------------------------
+# Sidebar filters
 st.sidebar.header("🔍 Filter Data")
+years = sorted(df['Tahun'].unique())
+selected_years = st.sidebar.multiselect("Pilih Tahun", years, default=years)
 
-pilih_tahun = st.sidebar.multiselect(
-    "Pilih Tahun",
-    sorted(df["Tahun"].unique()),
-    default=sorted(df["Tahun"].unique())
-)
+regencies = sorted(df['Kabupaten/Kota'].unique())
+selected_regencies = st.sidebar.multiselect("Pilih Kabupaten/Kota", 
+                                            regencies, 
+                                            default=regencies)
 
-pilih_kota = st.sidebar.multiselect(
-    "Pilih Kabupaten/Kota",
-    sorted(df["Kabupaten/Kota"].unique()),
-    default=sorted(df["Kabupaten/Kota"].unique())
-)
+# Filter data
+filtered_df = df[df['Tahun'].isin(selected_years) & 
+                 df['Kabupaten/Kota'].isin(selected_regencies)]
 
-pilih_faktor = st.sidebar.multiselect(
-    "Pilih Faktor Penyebab",
-    faktor_cols,
-    default=faktor_cols
-)
-
-df_sel = df[
-    df["Tahun"].isin(pilih_tahun) &
-    df["Kabupaten/Kota"].isin(pilih_kota)
-]
-
-if df_sel.empty:
-    st.warning("⚠ Tidak ada data yang cocok.")
-    st.stop()
-
-
-# ---------------------------------------------------------
-# KPI SUMMARY
-# ---------------------------------------------------------
-st.subheader("📌 Ringkasan Utama")
-
+# Main metrics
+st.header("📈 Ringkasan Statistik")
 col1, col2, col3, col4 = st.columns(4)
 
-total_cerai = df_sel[kolom_total].sum()
-rerata = df_sel[kolom_total].mean()
+with col1:
+    total_nikah = filtered_df['Nikah'].sum()
+    st.metric("Total Pernikahan", f"{total_nikah:,}")
 
-tahun_top = df_sel.groupby("Tahun")[kolom_total].sum().idxmax()
+with col2:
+    total_cerai = filtered_df['Faktor Perceraian - Jumlah'].sum()
+    st.metric("Total Perceraian", f"{total_cerai:,}")
 
-if pilih_faktor:
-    faktor_sum = df_sel[pilih_faktor].sum()
-    faktor_dominan = faktor_sum.idxmax() if faktor_sum.sum() > 0 else "-"
-else:
-    faktor_dominan = "-"
+with col3:
+    if total_nikah > 0:
+        rasio = (total_cerai / total_nikah) * 100
+        st.metric("Rasio Perceraian", f"{rasio:.2f}%")
+    else:
+        st.metric("Rasio Perceraian", "N/A")
 
-col1.metric("Total Perceraian", f"{total_cerai:,.0f}")
-col2.metric("Rata-rata per Kota", f"{rerata:,.0f}")
-col3.metric("Tahun Tertinggi", tahun_top)
-col4.metric("Faktor Dominan", faktor_dominan)
+with col4:
+    avg_nikah = filtered_df.groupby('Kabupaten/Kota')['Nikah'].sum().mean()
+    st.metric("Rata-rata Nikah/Kab", f"{avg_nikah:,.0f}")
 
 st.markdown("---")
 
+# Tabs for different visualizations
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Tren Tahunan", 
+                                         "🗺️ Per Wilayah", 
+                                         "🔍 Faktor Perceraian", 
+                                         "📉 Perbandingan", 
+                                         "📋 Data Mentah"])
 
-# ---------------------------------------------------------
-# TREN TOTAL CERAI + TOTAL NIKAH PER TAHUN
-# ---------------------------------------------------------
-st.subheader("📈 Tren Total Perceraian & Total Pernikahan per Tahun")
+with tab1:
+    st.subheader("Tren Pernikahan dan Perceraian per Tahun")
 
-df_tren_cerai = df_sel.groupby("Tahun")[kolom_total].sum().reset_index()
-df_tren_nikah = df_sel.groupby("Tahun")["Nikah"].sum().reset_index()
+    yearly_data = filtered_df.groupby('Tahun').agg({
+        'Nikah': 'sum',
+        'Faktor Perceraian - Jumlah': 'sum'
+    }).reset_index()
 
-df_tren = df_tren_cerai.merge(df_tren_nikah, on="Tahun")
-df_tren.columns = ["Tahun", "Total Perceraian", "Total Pernikahan"]
+    fig_trend = go.Figure()
+    fig_trend.add_trace(go.Scatter(x=yearly_data['Tahun'], 
+                                   y=yearly_data['Nikah'],
+                                   mode='lines+markers',
+                                   name='Pernikahan',
+                                   line=dict(color='green', width=3),
+                                   marker=dict(size=10)))
+    fig_trend.add_trace(go.Scatter(x=yearly_data['Tahun'], 
+                                   y=yearly_data['Faktor Perceraian - Jumlah'],
+                                   mode='lines+markers',
+                                   name='Perceraian',
+                                   line=dict(color='red', width=3),
+                                   marker=dict(size=10)))
+    fig_trend.update_layout(height=500, 
+                           xaxis_title="Tahun",
+                           yaxis_title="Jumlah",
+                           hovermode='x unified')
+    st.plotly_chart(fig_trend, use_container_width=True)
 
-df_melt = df_tren.melt(
-    id_vars="Tahun",
-    value_vars=["Total Perceraian", "Total Pernikahan"],
-    var_name="Kategori",
-    value_name="Jumlah"
-)
+    # Rasio perceraian per tahun
+    st.subheader("Tren Rasio Perceraian (%)")
+    yearly_data['Rasio'] = (yearly_data['Faktor Perceraian - Jumlah'] / yearly_data['Nikah']) * 100
 
-fig_tren = px.line(
-    df_melt,
-    x="Tahun",
-    y="Jumlah",
-    color="Kategori",
-    markers=True,
-    title="Tren Total Perceraian & Total Pernikahan per Tahun"
-)
+    fig_ratio = px.bar(yearly_data, x='Tahun', y='Rasio',
+                       text='Rasio',
+                       color='Rasio',
+                       color_continuous_scale='Reds')
+    fig_ratio.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
+    fig_ratio.update_layout(height=400, yaxis_title="Rasio Perceraian (%)")
+    st.plotly_chart(fig_ratio, use_container_width=True)
 
-fig_tren.update_xaxes(dtick=1, type="category")
+with tab2:
+    st.subheader("Distribusi Pernikahan dan Perceraian per Kabupaten/Kota")
 
-st.plotly_chart(fig_tren, use_container_width=True)
+    regional_data = filtered_df.groupby('Kabupaten/Kota').agg({
+        'Nikah': 'sum',
+        'Faktor Perceraian - Jumlah': 'sum'
+    }).reset_index()
+    regional_data = regional_data.sort_values('Nikah', ascending=False)
 
+    col1, col2 = st.columns(2)
 
-# ---------------------------------------------------------
-# TREN FAKTOR PENYEBAB (TOP 3 + LAINNYA)
-# ---------------------------------------------------------
-st.subheader("📊 Tren Faktor Penyebab (Top 3 + Faktor Lainnya)")
+    with col1:
+        fig_nikah = px.bar(regional_data.head(15), 
+                          x='Nikah', 
+                          y='Kabupaten/Kota',
+                          orientation='h',
+                          title='Top 15 Wilayah - Pernikahan',
+                          color='Nikah',
+                          color_continuous_scale='Greens')
+        fig_nikah.update_layout(height=600, yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_nikah, use_container_width=True)
 
-total_faktor = df_sel[pilih_faktor].sum().sort_values(ascending=False)
+    with col2:
+        regional_data_cerai = regional_data.sort_values('Faktor Perceraian - Jumlah', ascending=False)
+        fig_cerai = px.bar(regional_data_cerai.head(15), 
+                          x='Faktor Perceraian - Jumlah', 
+                          y='Kabupaten/Kota',
+                          orientation='h',
+                          title='Top 15 Wilayah - Perceraian',
+                          color='Faktor Perceraian - Jumlah',
+                          color_continuous_scale='Reds')
+        fig_cerai.update_layout(height=600, yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_cerai, use_container_width=True)
 
-top3 = total_faktor.head(3).index.tolist()
-lainnya = [f for f in pilih_faktor if f not in top3]
+    # Map visualization (simplified)
+    st.subheader("Rasio Perceraian per Wilayah")
+    regional_data['Rasio Perceraian'] = (regional_data['Faktor Perceraian - Jumlah'] / 
+                                         regional_data['Nikah']) * 100
+    regional_data = regional_data.sort_values('Rasio Perceraian', ascending=False)
 
-df_faktor = df_sel.groupby("Tahun")[top3 + lainnya].sum().reset_index()
-df_faktor["Faktor Lainnya"] = df_faktor[lainnya].sum(axis=1)
+    fig_map = px.bar(regional_data, 
+                     x='Kabupaten/Kota', 
+                     y='Rasio Perceraian',
+                     color='Rasio Perceraian',
+                     color_continuous_scale='RdYlGn_r',
+                     title='Rasio Perceraian per Wilayah (%)')
+    fig_map.update_layout(height=500, xaxis_tickangle=-45)
+    st.plotly_chart(fig_map, use_container_width=True)
 
-viz = top3 + ["Faktor Lainnya"]
+with tab3:
+    st.subheader("Analisis Faktor-Faktor Penyebab Perceraian")
 
-df_melt_f = df_faktor.melt(
-    id_vars="Tahun",
-    value_vars=viz,
-    var_name="Faktor",
-    value_name="Jumlah"
-)
+    # Get divorce factor columns
+    divorce_factors = [col for col in df.columns if 'Faktor Perceraian' in col and col != 'Faktor Perceraian - Jumlah']
 
-fig_faktor = px.line(
-    df_melt_f,
-    x="Tahun",
-    y="Jumlah",
-    color="Faktor",
-    markers=True,
-    title="Tren Faktor Penyebab (Top 3 + Faktor Lainnya)"
-)
+    # Simplify column names
+    factor_names = {col: col.replace('Faktor Perceraian - ', '') for col in divorce_factors}
 
-fig_faktor.update_xaxes(dtick=1, type="category")
+    # Aggregate by factors
+    factor_data = filtered_df[divorce_factors].sum().reset_index()
+    factor_data.columns = ['Faktor', 'Jumlah']
+    factor_data['Faktor'] = factor_data['Faktor'].map(factor_names)
+    factor_data = factor_data.sort_values('Jumlah', ascending=False)
 
-st.plotly_chart(fig_faktor, use_container_width=True)
+    col1, col2 = st.columns([2, 1])
 
+    with col1:
+        fig_factors = px.bar(factor_data, 
+                            x='Jumlah', 
+                            y='Faktor',
+                            orientation='h',
+                            title='Total Kasus per Faktor Perceraian',
+                            color='Jumlah',
+                            color_continuous_scale='Reds')
+        fig_factors.update_layout(height=600, yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_factors, use_container_width=True)
 
-# ---------------------------------------------------------
-# RANKING KOTA
-# ---------------------------------------------------------
-st.subheader("🏙️ Ranking Kabupaten/Kota berdasarkan Jumlah Perceraian")
+    with col2:
+        fig_pie = px.pie(factor_data, 
+                        values='Jumlah', 
+                        names='Faktor',
+                        title='Proporsi Faktor Perceraian')
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        fig_pie.update_layout(height=600, showlegend=False)
+        st.plotly_chart(fig_pie, use_container_width=True)
 
-df_rank = df_sel.groupby("Kabupaten/Kota")[kolom_total].sum().sort_values().reset_index()
+    # Trend of top factors over years
+    st.subheader("Tren Faktor Perceraian Utama per Tahun")
+    top_factors = factor_data.head(5)['Faktor'].tolist()
 
-fig_rank = px.bar(
-    df_rank,
-    x=kolom_total,
-    y="Kabupaten/Kota",
-    orientation="h",
-    color=kolom_total,
-    color_continuous_scale="Reds"
-)
+    # Reverse the mapping to get original column names
+    reverse_factor_names = {v: k for k, v in factor_names.items()}
+    top_factor_cols = [reverse_factor_names[f] for f in top_factors]
 
-st.plotly_chart(fig_rank, use_container_width=True)
+    factor_trend = filtered_df.groupby('Tahun')[top_factor_cols].sum().reset_index()
+    factor_trend_melted = factor_trend.melt(id_vars='Tahun', 
+                                           value_vars=top_factor_cols,
+                                           var_name='Faktor', 
+                                           value_name='Jumlah')
+    factor_trend_melted['Faktor'] = factor_trend_melted['Faktor'].map(factor_names)
 
+    fig_factor_trend = px.line(factor_trend_melted, 
+                              x='Tahun', 
+                              y='Jumlah', 
+                              color='Faktor',
+                              markers=True,
+                              title='Tren 5 Faktor Perceraian Teratas')
+    fig_factor_trend.update_layout(height=500)
+    st.plotly_chart(fig_factor_trend, use_container_width=True)
 
-# ---------------------------------------------------------
-# PIE CHART (TOP 3 + LAINNYA)
-# ---------------------------------------------------------
-st.subheader("🧩 Komposisi Faktor Penyebab (Top 3 + Lainnya)")
+with tab4:
+    st.subheader("Perbandingan Antar Wilayah")
 
-nilai_lain = df_sel[lainnya].sum().sum() if lainnya else 0
+    # Select regions to compare
+    comparison_regions = st.multiselect(
+        "Pilih Wilayah untuk Dibandingkan (Max 5)",
+        options=sorted(filtered_df['Kabupaten/Kota'].unique()),
+        default=sorted(filtered_df['Kabupaten/Kota'].unique())[:3],
+        max_selections=5
+    )
 
-pie_df = pd.DataFrame({
-    "Faktor": top3 + ["Faktor Lainnya"],
-    "Jumlah": list(total_faktor[top3]) + [nilai_lain]
-})
+    if comparison_regions:
+        comparison_df = filtered_df[filtered_df['Kabupaten/Kota'].isin(comparison_regions)]
 
-fig_pie = px.pie(
-    pie_df,
-    values="Jumlah",
-    names="Faktor",
-    hole=0.45,
-    title="Proporsi Faktor Penyebab (Top 3 + Lainnya)"
-)
+        # Comparison by year
+        comparison_yearly = comparison_df.groupby(['Kabupaten/Kota', 'Tahun']).agg({
+            'Nikah': 'sum',
+            'Faktor Perceraian - Jumlah': 'sum'
+        }).reset_index()
 
-st.plotly_chart(fig_pie, use_container_width=True)
+        col1, col2 = st.columns(2)
 
+        with col1:
+            fig_comp_nikah = px.line(comparison_yearly, 
+                                    x='Tahun', 
+                                    y='Nikah', 
+                                    color='Kabupaten/Kota',
+                                    markers=True,
+                                    title='Perbandingan Pernikahan')
+            fig_comp_nikah.update_layout(height=400)
+            st.plotly_chart(fig_comp_nikah, use_container_width=True)
 
-# ---------------------------------------------------------
-# SCATTER PLOT (TOTAL PER KOTA) — 1 TITIK PER KOTA
-# ---------------------------------------------------------
-st.subheader("📌 Scatter Plot: Ekonomi vs Pertengkaran (Total per Kota)")
+        with col2:
+            fig_comp_cerai = px.line(comparison_yearly, 
+                                    x='Tahun', 
+                                    y='Faktor Perceraian - Jumlah', 
+                                    color='Kabupaten/Kota',
+                                    markers=True,
+                                    title='Perbandingan Perceraian')
+            fig_comp_cerai.update_layout(height=400)
+            st.plotly_chart(fig_comp_cerai, use_container_width=True)
 
-kol_eko = "Fakor Perceraian - Ekonomi"
-kol_pert = "Fakor Perceraian - Perselisihan dan Pertengkaran Terus Menerus"
+        # Factor comparison
+        st.subheader("Perbandingan Faktor Perceraian")
+        comparison_factors = comparison_df.groupby('Kabupaten/Kota')[divorce_factors].sum()
+        comparison_factors.columns = [factor_names[col] for col in comparison_factors.columns]
 
-df_sct = df_sel.groupby("Kabupaten/Kota")[
-    [kol_eko, kol_pert, kolom_total]
-].sum().reset_index()
+        selected_factor = st.selectbox("Pilih Faktor untuk Dibandingkan", 
+                                      options=comparison_factors.columns)
 
-fig_sct = px.scatter(
-    df_sct,
-    x=kol_eko,
-    y=kol_pert,
-    size=kolom_total,
-    color="Kabupaten/Kota",
-    hover_name="Kabupaten/Kota",
-    title="Hubungan Ekonomi vs Pertengkaran (Total Per Kota)",
-    size_max=50
-)
+        fig_factor_comp = px.bar(comparison_factors, 
+                                x=comparison_factors.index, 
+                                y=selected_factor,
+                                title=f'Perbandingan: {selected_factor}',
+                                color=selected_factor,
+                                color_continuous_scale='Reds')
+        fig_factor_comp.update_layout(height=400, xaxis_title='Kabupaten/Kota')
+        st.plotly_chart(fig_factor_comp, use_container_width=True)
 
-st.plotly_chart(fig_sct, use_container_width=True)
+with tab5:
+    st.subheader("Data Mentah")
 
+    # Display options
+    show_all = st.checkbox("Tampilkan Semua Kolom", value=False)
 
-# ---------------------------------------------------------
-# RAW DATA
-# ---------------------------------------------------------
-with st.expander("📄 Lihat Data Mentah"):
-    st.dataframe(df_sel)
+    if show_all:
+        display_df = filtered_df
+    else:
+        basic_cols = ['Kabupaten/Kota', 'Tahun', 'Nikah', 'Faktor Perceraian - Jumlah']
+        display_df = filtered_df[basic_cols]
+
+    st.dataframe(display_df, use_container_width=True, height=500)
+
+    # Download button
+    csv = filtered_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download Data (CSV)",
+        data=csv,
+        file_name="data_pernikahan_perceraian_jatim.csv",
+        mime="text/csv"
+    )
+
+    # Statistics
+    st.subheader("Statistik Deskriptif")
+    st.dataframe(filtered_df.describe(), use_container_width=True)
+
+# Footer
+st.markdown("---")
+st.markdown("**Sumber Data:** Data Pernikahan dan Perceraian Jawa Timur 2020-2024")
+st.markdown("Dashboard dibuat menggunakan Streamlit & Plotly")
