@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 
 # Set page configuration
 st.set_page_config(page_title="Dashboard Pernikahan dan Perceraian Jawa Timur", 
-                   page_icon="💑", 
+                   page_icon="", 
                    layout="wide")
 
 # Custom CSS for compact layout
@@ -29,6 +29,8 @@ st.markdown("""
 @st.cache_data
 def load_data():
     df = pd.read_excel('data.xlsx')
+    # Pastikan kolom Tahun adalah integer
+    df['Tahun'] = df['Tahun'].astype(int)
     return df
 
 df = load_data()
@@ -121,6 +123,7 @@ with col_left:
         height=350,
         yaxis=dict(title='Jumlah', side='left', showgrid=False),
         yaxis2=dict(title='Rasio (%)', side='right', overlaying='y', showgrid=False),
+        xaxis=dict(dtick=1),  # Tampilkan setiap tahun
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(l=0, r=0, t=30, b=0),
         hovermode='x unified'
@@ -242,6 +245,8 @@ fig_factor_trend = px.line(factor_trend_melted,
                           color='Faktor',
                           markers=True)
 fig_factor_trend.update_traces(line=dict(width=3), marker=dict(size=10))
+# FIX: Tampilkan tahun sebagai integer, bukan desimal
+fig_factor_trend.update_xaxes(dtick=1, tickmode='linear')
 fig_factor_trend.update_layout(
     height=350,
     margin=dict(l=0, r=0, t=0, b=0),
