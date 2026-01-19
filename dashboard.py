@@ -36,7 +36,7 @@ def load_data():
 df = load_data()
 
 # Title
-st.title("💑 Dashboard Pernikahan dan Perceraian Jawa Timur (2020-2024)")
+st.title(" Dashboard Pernikahan dan Perceraian Jawa Timur (2020-2024)")
 
 # Sidebar filters
 with st.sidebar:
